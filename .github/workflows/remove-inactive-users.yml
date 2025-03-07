@@ -1,0 +1,24 @@
+name: Remove Inactive Users
+on:
+  schedule:
+    - cron: '0 0 * * 0'  # Runs weekly on Sunday at midnight
+  workflow_dispatch:  # Allows manual triggering
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Analyze User Activity
+        id: analyze_user_activity
+        uses: peter-murray/inactive-users-action@v1
+        with:
+          token: ${{ secrets.ORGANIZATION_ACCESS_TOKEN }}
+          organization: Virufy
+          activity_days: 31
+      
+      - name: Process Inactive Users
+        run: |
+          echo "Inactive users identified:"
+          cat ${{ steps.analyze_user_activity.outputs.report_json }}
+          
+          # Add logic here to remove inactive users if needed
