@@ -34,7 +34,7 @@ jobs:
           curl -fsSL https://github.com/cli/cli/releases/latest/download/gh_linux_amd64.tar.gz -o gh.tar.gz
           tar -xzf gh.tar.gz
           sudo mv gh-*/bin/gh /usr/local/bin/
-          rm -rf gh.tar.gz gh_*
+          rm -rf gh.tar.gz gh_
 
       - name: Authenticate GitHub CLI
         run: |
