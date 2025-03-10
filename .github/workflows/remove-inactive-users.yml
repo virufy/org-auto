@@ -29,12 +29,30 @@ jobs:
     needs: identify-inactive-users
     runs-on: ubuntu-latest
     steps:
-      - name: Install GitHub CLI Manually (via curl)
+      - name: Get Latest GitHub CLI Release Info
+        id: get_latest_gh_release
         run: |
-          curl -fsSL https://github.com/cli/cli/releases/latest/download/gh_linux_amd64.tar.gz -o gh.tar.gz
+          LATEST_RELEASE_INFO=$(curl -s https://api.github.com/repos/cli/cli/releases/latest)
+          LATEST_TAG=$(echo "$LATEST_RELEASE_INFO" | jq -r '.tag_name')
+          echo "Latest tag: $LATEST_TAG"
+          echo "LATEST_TAG=$LATEST_TAG" >> $GITHUB_ENV
+      
+      - name: Download GitHub CLI
+        run: |
+          GH_VERSION=${{ env.LATEST_TAG }}
+          GH_VERSION_NUMBER=$(echo $GH_VERSION | sed 's/^v//')
+          GH_FILENAME="gh_${GH_VERSION_NUMBER}_linux_amd64.tar.gz"
+          GH_DOWNLOAD_URL="https://github.com/cli/cli/releases/download/${GH_VERSION}/${GH_FILENAME}"
+          echo "Downloading from: $GH_DOWNLOAD_URL"
+          curl -fsSL "$GH_DOWNLOAD_URL" -o gh.tar.gz
+          echo "GH_FILENAME=$GH_FILENAME" >> $GITHUB_ENV
+      
+      - name: Install GitHub CLI
+        run: |
           tar -xzf gh.tar.gz
           sudo mv gh-*/bin/gh /usr/local/bin/
-          rm -rf gh.tar.gz gh_
+          rm -rf gh.tar.gz
+          gh --version
 
       - name: Authenticate GitHub CLI
         run: |
@@ -42,7 +60,7 @@ jobs:
 
       - name: Download Excluded Users List
         run: |
-          curl -o excluded_users.txt https://raw.githubusercontent.com/your-org-name/your-repo-name/main/excluded_users.txt
+          curl -o excluded_users.txt https://raw.githubusercontent.com/virufy/org-auto/main/excluded_users.txt
 
       - name: Remove Users from Organization (Excluding Certain Users)
         run: |
