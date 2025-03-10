@@ -26,19 +26,20 @@ jobs:
       - name: Add Last Active Days Column to JSON
         run: |
             echo "Adding last_active_days column..."
-            jq -s '
+            jq '
                 map(
                 . + {
                     last_active_days: (
                     if .last_activity_timestamp then
                         ((now - .last_activity_timestamp) / 86400 | floor)
                     else
-                        20157.95050925926  # Use the default value you provided
+                        "Not Available"
                     end
                     )
                 }
                 )
             ' inactive_users.json > updated_inactive_users.json
+
 
       - name: Debug Updated JSON File
         run: |
