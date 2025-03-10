@@ -29,12 +29,12 @@ jobs:
     needs: identify-inactive-users
     runs-on: ubuntu-latest
     steps:
-      - name: Install GitHub CLI
+      - name: Install GitHub CLI Manually (via curl)
         run: |
-          sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-key C99B11DEB97541F0
-          sudo apt-add-repository https://cli.github.com/packages
-          sudo apt update
-          sudo apt install gh -y
+          curl -fsSL https://github.com/cli/cli/releases/latest/download/gh_2.36.0_linux_amd64.tar.gz -o gh.tar.gz
+          tar -xzf gh.tar.gz
+          sudo mv gh_2.36.0_linux_amd64/bin/gh /usr/local/bin/
+          rm -rf gh.tar.gz gh_2.36.0_linux_amd64
 
       - name: Authenticate GitHub CLI
         run: |
@@ -52,7 +52,7 @@ jobs:
               echo "Skipping excluded user $user"
             else
               echo "Removing user $user from organization..."
-              gh api -X DELETE orgs/virufy/members/$user || echo "Failed to remove user $user"
+              gh api -X DELETE orgs/Virufy/members/$user || echo "Failed to remove user $user"
               echo "Removed user $user successfully."
             fi
           done
