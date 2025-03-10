@@ -62,7 +62,7 @@ jobs:
         run: |
           echo "Reading inactive users from report..."
           jq -r '.[] | select(.last_active_days > 31) | .login' inactive_users.json | while read -r user; do
-            if grep -q "^$user$" excluded_users.txt; then
+            if grep -Fxq "$user" excluded_users.txt; then
               echo "Skipping excluded user $user"
             else
               echo "Removing user $user from organization..."
@@ -70,3 +70,4 @@ jobs:
               echo "Removed user $user successfully."
             fi
           done
+
