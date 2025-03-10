@@ -58,6 +58,13 @@ jobs:
         run: |
           curl -o excluded_users.txt https://raw.githubusercontent.com/virufy/org-auto/main/excluded_users.txt
 
+      - name: Debug Excluded Users List
+        run: |
+          echo "Contents of excluded_users.txt:"
+          cat excluded_users.txt
+          echo "Number of excluded users:"
+          wc -l excluded_users.txt
+
       - name: Remove Users from Organization (Excluding Certain Users)
         run: |
           echo "Reading inactive users from report..."
