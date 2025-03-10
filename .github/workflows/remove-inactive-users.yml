@@ -44,29 +44,29 @@ jobs:
         with:
           name: inactive-users-report
 
-      - name: Install GitHub CLI
-        run: |
-          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-          sudo apt update && sudo apt install gh -y
-
-      - name: Verify GitHub CLI installation
-        run: gh --version
-
-      - name: Authenticate GitHub CLI
-        run: |
-          echo "${{ secrets.ORGANIZATION_ACCESS_TOKEN }}" | gh auth login --with-token
-
-      - name: Create Excluded Users List from Secret
+      - name: Create Excluded Users List from Secret (Optional)
         run: |
           echo "${{ secrets.EXCLUDED_USERS }}" > excluded_users.txt
+
+      - name: Debug Excluded Users List (Optional)
+        run: |
           echo "Contents of excluded_users.txt:"
-          cat excluded_users.txt
+          cat excluded_users.txt || echo "File not found or empty"
+
+      - name: Debug JQ Output
+        run: |
+          echo "Filtered inactive users:"
+          jq -r '.[] | select(.last_active_days > 31) | .login' inactive_users.json || echo "No matching users found"
 
       - name: Remove Users from Organization (Excluding Certain Users)
         run: |
           echo "Reading inactive users from report..."
           jq -r '.[] | select(.last_active_days > 31) | .login' inactive_users.json | while read -r user; do
+            if [ -z "$user" ]; then
+              echo "No inactive users found."
+              exit 0
+            fi
+
             if grep -Fxq "$user" excluded_users.txt; then
               echo "Skipping excluded user $user"
             else
