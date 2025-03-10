@@ -21,7 +21,7 @@ jobs:
       - name: Save Report of Inactive Users
         run: |
           echo "Saving report of inactive users..."
-          echo "${{ steps.analyze_user_activity.outputs.report_json }}" > inactive_users.json
+          cp "${{ steps.analyze_user_activity.outputs.report_json }}" inactive_users.json
           cat inactive_users.json
 
       - name: Upload Inactive Users Report
