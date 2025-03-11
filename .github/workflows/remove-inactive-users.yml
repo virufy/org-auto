@@ -83,22 +83,22 @@ jobs:
       # Step 5: Remove Inactive Users and Generate Report
       - name: Remove Inactive Users and Generate Report
         run: |
-          echo "Removing inactive users and generating report..."
+            echo "Removing inactive users and generating report..."
 
-          # Calculate inactivity threshold (31 days ago)
-          threshold_date=$(date -d "31 days ago" +%s)
+            # Calculate inactivity threshold (31 days ago)
+            threshold_date=$(date -d "31 days ago" +%s)
 
-          # Read excluded users from secret (comma-separated list)
-          IFS=',' read -ra excluded_users <<< "${{ secrets.EXCLUDED_USERS }}"
+            # Read excluded users from secret (comma-separated list)
+            IFS=',' read -ra excluded_users <<< "${{ secrets.EXCLUDED_USERS }}"
 
-          # Initialize updated users list and report file
-          echo "[]" > updated_users.json
-          echo "" > activity_report.txt
+            # Initialize updated users list and report file
+            echo "[]" > updated_users.json
+            echo "" > activity_report.txt
 
-          removed_count=0
+            removed_count=0
 
-          # Process each user in the activity report
-          jq -r '.[] | @base64' user_activity.json | while read user_data; do
+            # Process each user in the activity report
+            jq -r '.[] | @base64' user_activity.json | while read user_data; do
             
             # Decode JSON object for each user
             user=$(echo "$user_data" | base64 --decode)
@@ -107,38 +107,41 @@ jobs:
             last_active=$(echo "$user" | jq -r '.last_active')
 
             if [ "$last_active" != "null" ]; then
-              last_active_timestamp=$(date -d "$last_active" +%s)
-              is_inactive=$([ "$last_active_timestamp" -lt "$threshold_date" ] && echo true || echo false)
+                last_active_timestamp=$(date -d "$last_active" +%s)
+                is_inactive=$([ "$last_active_timestamp" -lt "$threshold_date" ] && echo true || echo false)
             else
-              is_inactive=true  # If last_active is null, consider inactive by default.
+                is_inactive=true  # If last_active is null, consider inactive by default.
             fi
 
-            if [ "$is_inactive" = true ]; then
-                
-              # Check if the user is in the excluded list (admins)
-              if [[ ! " ${excluded_users[@]} " =~ " ${username} " ]]; then
+            if [ "$is_inactive" = true ]; then          
+                # Check if the user is in the excluded list (admins)
+                if [[ ! " ${excluded_users[@]} " =~ " ${username} " ]]; then
                 echo "Removing inactive user: $username"
-                gh api -X DELETE orgs/virufy/members/$username || echo "Failed to remove user $username"
-                removal_status="removed"
-                ((removed_count++))
-                echo "- Removed: $username (Last active: ${last_active:-Never})" >> activity_report.txt
-                
-                # Add removed user to updated JSON list file.
-                jq --arg login "$username" --arg last_active "$last_active" --arg status "$removal_status" \
-                   '. += [{"login": $login, "last_active": $last_active, "status": $status}]' \
-                   updated_users.json > tmp.json && mv tmp.json updated_users.json
-                
-              else
+                if gh api -X DELETE orgs/virufy/members/$username; then
+                    removal_status="removed"
+                    ((removed_count++))
+                    echo "- Removed: $username (Last active: ${last_active:-Never})" >> activity_report.txt
+                    
+                    # Add removed user to updated JSON list file.
+                    jq --arg login "$username" --arg last_active "$last_active" --arg status "$removal_status" \
+                    '. += [{"login": $login, "last_active": $last_active, "status": $status}]' \
+                    updated_users.json > tmp.json && mv tmp.json updated_users.json
+                    
+                else
+                    echo "Failed to remove user: $username" >> activity_report.txt
+                fi          
+                else
                 echo "Skipping excluded admin user: $username"
-              fi
+                fi
 
             fi
 
-          done
+            done
 
-          if [ "$removed_count" = 0 ]; then 
-             echo "- No users were removed this week." >> activity_report.txt 
-          fi 
+            if [ "$removed_count" = 0 ]; then 
+            echo "- No users were removed this week." >> activity_report.txt 
+            fi 
+
 
       # Step 6: Save Updated User List as an Artifact
       - name: Upload Updated User List Report
