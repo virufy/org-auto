@@ -1,11 +1,11 @@
-name: Track User Activity
+name: Track User Activity and Remove Inactive Users
 
 on:
   workflow_dispatch: # Allows manual triggering of the workflow
 
 jobs:
   fetch-user-activity:
-    name: Fetch User Activity
+    name: Fetch User Activity and Remove Inactive Users
     runs-on: ubuntu-latest
 
     steps:
@@ -43,7 +43,7 @@ jobs:
 
           echo "Organization members saved to $members_file"
 
-    # Step 4: Fetch User Activity for Each Member
+      # Step 4: Fetch User Activity for Each Member
       - name: Fetch User Activity
         run: |
           echo "Fetching user activity..."
@@ -74,10 +74,53 @@ jobs:
           # Validate and pretty-print the final JSON
           jq '.' user_activity.json > temp.json && mv temp.json user_activity.json
 
-
       # Step 5: Save Results as an Artifact
       - name: Upload User Activity Report
         uses: actions/upload-artifact@v4
         with:
           name: user-activity-report
           path: user_activity.json
+
+      # Step 6: Remove Inactive Users Based on Last Active Date (Excluding Admins)
+      - name: Remove Inactive Users
+        run: |
+          echo "Removing inactive users..."
+
+          # Calculate inactivity threshold (31 days ago)
+          threshold_date=$(date -d "31 days ago" +%s)
+
+          # Read excluded users from secret (comma-separated list)
+          IFS=',' read -ra excluded_users <<< "${{ secrets.EXCLUDED_USERS }}"
+
+          # Process each user in the activity report
+          jq -r '.[] | @base64' user_activity.json | while read user_data; do
+            
+            # Decode JSON object for each user
+            user=$(echo "$user_data" | base64 --decode)
+            
+            username=$(echo "$user" | jq -r '.login')
+            last_active=$(echo "$user" | jq -r '.last_active')
+
+            if [ "$last_active" != "null" ]; then
+              last_active_timestamp=$(date -d "$last_active" +%s)
+
+              if [ "$last_active_timestamp" -lt "$threshold_date" ]; then
+                
+                # Check if the user is in the excluded list (admins)
+                if [[ ! " ${excluded_users[@]} " =~ " ${username} " ]]; then
+                  echo "Removing inactive user: $username"
+                  gh api -X DELETE orgs/virufy/members/$username || echo "Failed to remove user $username"
+                else
+                  echo "Skipping excluded admin user: $username"
+                fi
+
+              else
+                echo "$username is active."
+              fi
+
+            else
+              echo "$username has no recorded activity. Skipping."
+            fi
+
+          done
+
