@@ -1,6 +1,8 @@
 name: Track User Activity and Remove Inactive Users
 
 on:
+  schedule:
+    - cron: '0 0 * * 0'  # Runs at 00:00 every Sunday
   workflow_dispatch: # Allows manual triggering of the workflow
 
 jobs:
@@ -74,23 +76,26 @@ jobs:
           # Validate and pretty-print the final JSON
           jq '.' user_activity.json > temp.json && mv temp.json user_activity.json
 
-      # Step 5: Save Results as an Artifact
-      - name: Upload User Activity Report
-        uses: actions/upload-artifact@v4
-        with:
-          name: user-activity-report
-          path: user_activity.json
-
-      # Step 6: Remove Inactive Users Based on Last Active Date (Excluding Admins)
-      - name: Remove Inactive Users
+      # Step 5: Remove Inactive Users and Generate Report
+      - name: Remove Inactive Users and Generate Report
         run: |
-          echo "Removing inactive users..."
+          echo "Removing inactive users and generating report..."
 
           # Calculate inactivity threshold (31 days ago)
           threshold_date=$(date -d "31 days ago" +%s)
 
           # Read excluded users from secret (comma-separated list)
           IFS=',' read -ra excluded_users <<< "${{ secrets.EXCLUDED_USERS }}"
+
+          # Initialize updated users list and report
+          echo "[]" > updated_users.json
+          echo "Weekly User Activity Report" > activity_report.txt
+          echo "==============================" >> activity_report.txt
+          echo "" >> activity_report.txt
+
+          removed_count=0
+          active_count=0
+          excluded_count=0
 
           # Process each user in the activity report
           jq -r '.[] | @base64' user_activity.json | while read user_data; do
@@ -103,24 +108,64 @@ jobs:
 
             if [ "$last_active" != "null" ]; then
               last_active_timestamp=$(date -d "$last_active" +%s)
+              is_inactive=$([ "$last_active_timestamp" -lt "$threshold_date" ] && echo true || echo false)
+            else
+              is_inactive=true  # If last_active is null, consider inactive by default.
+            fi
 
-              if [ "$last_active_timestamp" -lt "$threshold_date" ]; then
+            if [ "$is_inactive" = true ]; then
                 
-                # Check if the user is in the excluded list (admins)
-                if [[ ! " ${excluded_users[@]} " =~ " ${username} " ]]; then
-                  echo "Removing inactive user: $username"
-                  gh api -X DELETE orgs/virufy/members/$username || echo "Failed to remove user $username"
-                else
-                  echo "Skipping excluded admin user: $username"
-                fi
-
+              # Check if the user is in the excluded list (admins)
+              if [[ ! " ${excluded_users[@]} " =~ " ${username} " ]]; then
+                echo "Removing inactive user: $username"
+                gh api -X DELETE orgs/virufy/members/$username || echo "Failed to remove user $username"
+                removal_status="removed"
+                ((removed_count++))
+                echo "- Removed: $username (Last active: ${last_active:-Never})" >> activity_report.txt
               else
-                echo "$username is active."
+                echo "Skipping excluded admin user: $username"
+                removal_status="excluded"
+                ((excluded_count++))
+                echo "- Excluded: $username (Admin user)" >> activity_report.txt
               fi
 
             else
-              echo "$username has no recorded activity. Skipping."
+              echo "$username is active."
+              removal_status="active"
+              ((active_count++))
             fi
 
+            # Add the user's status to the updated users list JSON file.
+            jq --arg login "$username" --arg last_active "$last_active" --arg status "$removal_status" \
+               '. += [{"login": $login, "last_active": $last_active, "status": $status}]' \
+               updated_users.json > tmp.json && mv tmp.json updated_users.json
+
           done
+
+          # Add summary to report
+          echo "" >> activity_report.txt
+          echo "Summary:" >> activity_report.txt
+          echo "- Total active users: $active_count" >> activity_report.txt
+          echo "- Total removed users: $removed_count" >> activity_report.txt
+          echo "- Total excluded users: $excluded_count" >> activity_report.txt
+
+      # Step 6: Save Updated User List as an Artifact
+      - name: Upload Updated User List Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: updated-user-list-report
+          path: updated_users.json
+
+      # Step 7: Send Email Report
+      - name: Send Email Report
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{secrets.EMAIL_USER}}
+          password: ${{secrets.EMAIL_PASS}}
+          subject: Weekly User Activity Report - Virufy GitHub Organization
+          body: file://activity_report.txt
+          to: ${{secrets.REPORT_EMAIL}}
+          from: GitHub Actions
 
