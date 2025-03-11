@@ -17,14 +17,31 @@ jobs:
       - name: Install jq
         run: sudo apt-get install jq -y
 
-      # Step 3: Fetch Organization Members
+      # Step 3: Fetch Organization Members (with Pagination)
       - name: Fetch Organization Members
         run: |
-          echo "Fetching organization members..."
-          curl -H "Authorization: Bearer ${{ secrets.ORGANIZATION_ACCESS_TOKEN }}" \
-            https://api.github.com/orgs/virufy/members \
-            | jq '.' > org_members.json
-          echo "Organization members saved to org_members.json"
+          echo "Fetching all organization members..."
+          page=1
+          members_file="org_members.json"
+          echo "[]" > $members_file  # Initialize an empty JSON array
+
+          while true; do
+            response=$(curl -H "Authorization: Bearer ${{ secrets.ORGANIZATION_ACCESS_TOKEN }}" \
+              "https://api.github.com/orgs/virufy/members?per_page=100&page=$page")
+            
+            # Check if response is empty (no more pages)
+            if [ "$(echo "$response" | jq '. | length')" -eq 0 ]; then
+              break
+            fi
+
+            # Append current page results to the JSON file
+            jq -s '.[0] + .[1]' $members_file <(echo "$response") > tmp.json && mv tmp.json $members_file
+            
+            # Increment page number
+            page=$((page + 1))
+          done
+
+          echo "Organization members saved to $members_file"
 
       # Step 4: Fetch User Activity for Each Member
       - name: Fetch User Activity
