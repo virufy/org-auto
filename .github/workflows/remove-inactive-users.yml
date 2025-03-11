@@ -1,95 +1,54 @@
-name: Identify and Remove Inactive Users
+name: Track User Activity
 
 on:
-  schedule:
-    - cron: '0 0 * * 0'  # Runs weekly on Sunday at midnight
-  workflow_dispatch:  # Allows manual triggering
+  workflow_dispatch: # Allows manual triggering of the workflow
 
 jobs:
-  identify-inactive-users:
-    name: Identify Inactive Users
+  fetch-user-activity:
+    name: Fetch User Activity
     runs-on: ubuntu-latest
+
     steps:
-      - name: Analyze User Activity
-        id: analyze_user_activity
-        uses: peter-murray/inactive-users-action@v1
-        with:
-          token: ${{ secrets.ORGANIZATION_ACCESS_TOKEN }}
-          organization: Virufy
-          activity_days: 60
+      # Step 1: Checkout the repository
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      - name: Save Report of Inactive Users
+      # Step 2: Install jq (for JSON processing)
+      - name: Install jq
+        run: sudo apt-get install jq -y
+
+      # Step 3: Fetch Organization Members
+      - name: Fetch Organization Members
         run: |
-          echo "Saving report of inactive users..."
-          cp "${{ steps.analyze_user_activity.outputs.report_json }}" inactive_users.json
+          echo "Fetching organization members..."
+          curl -H "Authorization: Bearer ${{ secrets.ORGANIZATION_ACCESS_TOKEN }}" \
+            https://api.github.com/orgs/virufy/members \
+            | jq '.' > org_members.json
+          echo "Organization members saved to org_members.json"
 
-      - name: Add Last Active Days Column to JSON
+      # Step 4: Fetch User Activity for Each Member
+      - name: Fetch User Activity
         run: |
-            echo "Adding last_active_days column..."
-            jq '
-                map(
-                . + {
-                    last_active_days: (
-                    if .last_activity_timestamp then
-                        ((now - .last_activity_timestamp) / 86400 | floor)
-                    else
-                        "Not Available"
-                    end
-                    )
-                }
-                )
-            ' inactive_users.json > updated_inactive_users.json
+          echo "Fetching user activity..."
+          jq -r '.[].login' org_members.json | while read username; do
+            echo "Fetching events for $username..."
+            curl -H "Authorization: Bearer ${{ secrets.ORGANIZATION_ACCESS_TOKEN }}" \
+              https://api.github.com/users/$username/events \
+              | jq '[.[] | {type, created_at}]' > ${username}_events.json
+            
+            # Get the most recent event timestamp
+            last_active=$(jq -r '.[0].created_at // empty' ${username}_events.json)
+            
+            if [ -n "$last_active" ]; then
+              echo "{\"login\": \"$username\", \"last_active\": \"$last_active\"}" >> user_activity.json
+            else
+              echo "{\"login\": \"$username\", \"last_active\": null}" >> user_activity.json
+            fi
+          done
 
-
-      - name: Debug Updated JSON File
-        run: |
-          echo "Contents of updated_inactive_users.json:"
-          cat updated_inactive_users.json
-
-      - name: Upload Updated Inactive Users Report
+      # Step 5: Save Results as an Artifact
+      - name: Upload User Activity Report
         uses: actions/upload-artifact@v4
         with:
-          name: updated-inactive-users-report
-          path: updated_inactive_users.json
-
-  remove-inactive-users:
-    name: Remove Inactive Users
-    needs: identify-inactive-users
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download Updated Inactive Users Report
-        uses: actions/download-artifact@v4
-        with:
-          name: updated-inactive-users-report
-
-      - name: Create Excluded Users List from Secret (Optional)
-        run: |
-          echo "${{ secrets.EXCLUDED_USERS }}" > excluded_users.txt
-
-      - name: Debug Excluded Users List (Optional)
-        run: |
-          echo "Contents of excluded_users.txt:"
-          cat excluded_users.txt || echo "File not found or empty"
-
-      - name: Debug JQ Output with Last Active Days Filter
-        run: |
-          echo "Filtered inactive users based on last_active_days:"
-          jq -r '.[] | select(.last_active_days > 31 and .isActive == false) | .login' updated_inactive_users.json || echo "No matching users found"
-
-      - name: Remove Users from Organization (Excluding Certain Users)
-        run: |
-          echo "Reading inactive users from report..."
-          jq -r '.[] | select(.last_active_days > 31 and .isActive == false) | .login' updated_inactive_users.json | while read -r user; do
-            if [ -z "$user" ]; then
-              echo "No inactive users found."
-              exit 0
-            fi
-
-            if grep -Fxq "$user" excluded_users.txt; then
-              echo "Skipping excluded user $user"
-            else
-              echo "Removing user $user from organization..."
-              gh api -X DELETE orgs/Virufy/members/$user || echo "Failed to remove user $user"
-              echo "Removed user $user successfully."
-            fi
-          done || echo "No users to process"
+          name: user-activity-report
+          path: user_activity.json
