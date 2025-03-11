@@ -43,10 +43,12 @@ jobs:
 
           echo "Organization members saved to $members_file"
 
-      # Step 4: Fetch User Activity for Each Member
+    # Step 4: Fetch User Activity for Each Member
       - name: Fetch User Activity
         run: |
           echo "Fetching user activity..."
+          echo "[" > user_activity.json  # Start the JSON array
+          first_entry=true
           jq -r '.[].login' org_members.json | while read username; do
             echo "Fetching events for $username..."
             curl -H "Authorization: Bearer ${{ secrets.ORGANIZATION_ACCESS_TOKEN }}" \
@@ -54,14 +56,24 @@ jobs:
               | jq '[.[] | {type, created_at}]' > ${username}_events.json
             
             # Get the most recent event timestamp
-            last_active=$(jq -r '.[0].created_at // empty' ${username}_events.json)
+            last_active=$(jq -r '.[0].created_at // null' ${username}_events.json)
             
-            if [ -n "$last_active" ]; then
-              echo "{\"login\": \"$username\", \"last_active\": \"$last_active\"}" >> user_activity.json
+            # Add comma for all but the first entry
+            if [ "$first_entry" = true ]; then
+              first_entry=false
             else
-              echo "{\"login\": \"$username\", \"last_active\": null}" >> user_activity.json
+              echo "," >> user_activity.json
             fi
+            
+            # Append the user data as a JSON object
+            jq -n --arg login "$username" --arg last_active "$last_active" \
+              '{login: $login, last_active: $last_active}' >> user_activity.json
           done
+          echo "]" >> user_activity.json  # End the JSON array
+
+          # Validate and pretty-print the final JSON
+          jq '.' user_activity.json > temp.json && mv temp.json user_activity.json
+
 
       # Step 5: Save Results as an Artifact
       - name: Upload User Activity Report
