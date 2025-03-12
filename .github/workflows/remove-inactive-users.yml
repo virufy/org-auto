@@ -1,4 +1,4 @@
-name: Track User Activity and Remove Inactive Users
+name: Identify All Users and Inactive Users
 
 on:
   schedule:
@@ -6,8 +6,8 @@ on:
   workflow_dispatch: # Allows manual triggering of the workflow
 
 jobs:
-  fetch-user-activity:
-    name: Fetch User Activity and Remove Inactive Users
+  identify-users:
+    name: Identify All Users and Inactive Users
     runs-on: ubuntu-latest
 
     steps:
@@ -15,15 +15,23 @@ jobs:
       - name: Authenticate GitHub CLI
         run: echo "${{ secrets.ORGANIZATION_ACCESS_TOKEN }}" | gh auth login --with-token
       
-      # Step 1: Checkout the repository
+      # Step 1: Initialize Variables
+      - name: Initialize Variables
+        run: |
+          echo "Initializing variables..."
+          INACTIVITY_THRESHOLD_DAYS=31
+          export INACTIVITY_THRESHOLD_DAYS=$INACTIVITY_THRESHOLD_DAYS
+          echo "Inactivity threshold set to $INACTIVITY_THRESHOLD_DAYS days."
+
+      # Step 2: Checkout the repository
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # Step 2: Install jq (for JSON processing)
+      # Step 3: Install jq (for JSON processing)
       - name: Install jq
         run: sudo apt-get install jq -y
 
-      # Step 3: Fetch Organization Members (with Pagination)
+      # Step 4: Fetch Organization Members (with Pagination)
       - name: Fetch Organization Members
         run: |
           echo "Fetching all organization members..."
@@ -49,56 +57,51 @@ jobs:
 
           echo "Organization members saved to $members_file"
 
-      # Step 4: Fetch User Activity for Each Member
-      - name: Fetch User Activity
+      # Step 5: Fetch User Activity for Each Member and Display All Users with Last Activity Time
+      - name: Display All Users with Last Activity Time
         run: |
-          echo "Fetching user activity..."
-          echo "[" > user_activity.json  # Start the JSON array
-          first_entry=true
+          echo "Fetching user activity and displaying last active times..."
+          
+          echo "All Users:" > all_users.txt
+
+          # Process each user in the activity report
           jq -r '.[].login' org_members.json | while read username; do
+            
             echo "Fetching events for $username..."
-            curl -H "Authorization: Bearer ${{ secrets.ORGANIZATION_ACCESS_TOKEN }}" \
-              https://api.github.com/users/$username/events \
-              | jq '[.[] | {type, created_at}]' > ${username}_events.json
-            
-            # Get the most recent event timestamp
-            last_active=$(jq -r '.[0].created_at // null' ${username}_events.json)
-            
-            # Add comma for all but the first entry
-            if [ "$first_entry" = true ]; then
-              first_entry=false
+            events=$(curl -H "Authorization: Bearer ${{ secrets.ORGANIZATION_ACCESS_TOKEN }}" \
+              https://api.github.com/users/$username/events)
+
+            last_active=$(echo "$events" | jq -r '.[0].created_at // null')
+
+            if [ "$last_active" != "null" ]; then
+              echo "- $username (Last active: $last_active)" >> all_users.txt
             else
-              echo "," >> user_activity.json
+              echo "- $username (Last active: Never)" >> all_users.txt
             fi
-            
-            # Append the user data as a JSON object
-            jq -n --arg login "$username" --arg last_active "$last_active" \
-              '{login: $login, last_active: $last_active}' >> user_activity.json
+
           done
-          echo "]" >> user_activity.json  # End the JSON array
 
-          # Validate and pretty-print the final JSON
-          jq '.' user_activity.json > temp.json && mv temp.json user_activity.json
+          cat all_users.txt
 
-      # Step 5: Remove Inactive Users
-      - name: Remove Inactive Users
+      # Step 6: Identify Inactive Users Based on INACTIVITY_THRESHOLD_DAYS
+      - name: Identify Inactive Users Based on Threshold
         run: |
-          echo "Removing inactive users..."
+          echo "Identifying inactive users based on threshold ($INACTIVITY_THRESHOLD_DAYS days)..."
+          
+          threshold_date=$(date -d "$INACTIVITY_THRESHOLD_DAYS days ago" +%s)
 
-          # Calculate inactivity threshold (31 days ago)
-          threshold_date=$(date -d "31 days ago" +%s)
+          echo "Inactive Users:" > inactive_users.txt
 
           # Read excluded users from secret (comma-separated list)
           IFS=',' read -ra excluded_users <<< "${{ secrets.EXCLUDED_USERS }}"
 
-          # Process each user in the activity report
-          jq -r '.[] | @base64' user_activity.json | while read user_data; do
+          jq -r '.[].login' org_members.json | while read username; do
             
-            # Decode JSON object for each user
-            user=$(echo "$user_data" | base64 --decode)
-            
-            username=$(echo "$user" | jq -r '.login')
-            last_active=$(echo "$user" | jq -r '.last_active')
+            echo "Fetching events for $username..."
+            events=$(curl -H "Authorization: Bearer ${{ secrets.ORGANIZATION_ACCESS_TOKEN }}" \
+              https://api.github.com/users/$username/events)
+
+            last_active=$(echo "$events" | jq -r '.[0].created_at // null')
 
             if [ "$last_active" != "null" ]; then
               last_active_timestamp=$(date -d "$last_active" +%s)
@@ -111,33 +114,27 @@ jobs:
                 
               # Check if the user is in the excluded list (admins)
               if [[ ! " ${excluded_users[@]} " =~ " ${username} " ]]; then
-                echo "Removing inactive user: $username"
-                if gh api -X DELETE orgs/virufy/members/$username; then
-                  echo "Successfully removed user: $username"
-                else
-                  echo "Failed to remove user: $username"
-                fi
+                echo "- $username (Last active: ${last_active:-Never})" >> inactive_users.txt
               else
-                echo "Skipping excluded admin user: $username"
+                echo "- Skipping excluded admin user: $username"
               fi
 
-            else
-              echo "$username is active."
             fi
 
           done
 
-      # Step 6: Send Email Notification
-      - name: Send Email Notification
-        uses: dawidd6/action-send-mail@v3
+          cat inactive_users.txt
+
+      # Step 7: Upload User Lists as Artifacts (All Users and Inactive Users)
+      - name: Upload User Lists as Artifacts
+        uses: actions/upload-artifact@v4
         with:
-          server_address: smtp.gmail.com
-          server_port: 587
-          username: ${{ secrets.EMAIL_USER }}
-          password: ${{ secrets.EMAIL_PASS }}
-          subject: Weekly User Activity Update - Inactive Users Removed
-          body: |
-            Inactive users have been removed from the organization.
-            Please review the organization members for updates.
-          to: ${{ secrets.REPORT_EMAIL }}
-          from: GitHub Actions
+          name: all-user-list-report
+          path: all_users.txt
+      
+      - name: Upload Inactive User List Report as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: inactive-user-list-report
+          path: inactive_users.txt
+
