@@ -22,4 +22,4 @@ The automation uses GitHub Actions and the [inactive-users-action](https://githu
 - Repository visibility changes: Changing a repository's visibility (public, private). 
 - User interactions: Watching or starring repositories.
 
-# Reading repositories is not counted as an activity since the GitHub Enterprise plan requires the Audit log API. 
+### Reading repositories is not counted as an activity since the GitHub Enterprise plan requires the Audit log API. 
