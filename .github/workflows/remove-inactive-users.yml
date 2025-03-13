@@ -86,12 +86,13 @@ jobs:
 
           cat all_users.txt
 
-      # Step 6: Identify Inactive Users Based on INACTIVITY_THRESHOLD_DAYS
+      # Step 6: Identify Inactive Users Based on INACTIVITY_THRESHOLD_DAYS (FIXED)
       - name: Identify Inactive Users Based on Threshold
         run: |
           echo "Identifying inactive users based on threshold ($INACTIVITY_THRESHOLD_DAYS days)..."
           
-          threshold_date=$(date -d "$INACTIVITY_THRESHOLD_DAYS days ago" +%s)
+          # Get threshold date in UTC
+          threshold_date=$(date -u -d "$INACTIVITY_THRESHOLD_DAYS days ago" +%s)
 
           echo "Inactive Users:" > inactive_users.txt
 
@@ -107,15 +108,16 @@ jobs:
             last_active=$(echo "$events" | jq -r '.[0].created_at // null')
 
             if [ "$last_active" != "null" ]; then
-              last_active_timestamp=$(date -d "$last_active" +%s)
-              is_inactive=$([ "$last_active_timestamp" -lt "$threshold_date" ] && echo true || echo false)
+              # Convert GitHub timestamp to UTC epoch time for comparison
+              last_active_timestamp=$(date -u -d "$last_active" +%s)
+              is_active=$([ "$last_active_timestamp" -gt "$threshold_date" ] && echo true || echo false)
             else
-              is_inactive=true  # If last_active is null, consider inactive by default.
+              is_active=false  # If no activity, consider inactive by default.
             fi
 
-            if [ "$is_inactive" = true ]; then
+            if [ "$is_active" = false ]; then
                 
-              # Check if the user is in the excluded list
+              # Check if the user is in the excluded list (admins or other exceptions)
               if [[ ! " ${excluded_users[@]} " =~ " ${username} " ]]; then
                 echo "- $username (Last active: ${last_active:-Never})" >> inactive_users.txt
               else
