@@ -23,3 +23,12 @@ The automation uses GitHub Actions and the [inactive-users-action](https://githu
 - User interactions: Watching or starring repositories.
 
 ### Reading repositories is not counted as an activity since the GitHub Enterprise plan requires the Audit log API. 
+
+
+## References
+1. https://github.com/peter-murray/inactive-users-action/blob/main/README.md about inactive users action using Github Action.
+
+2. https://github.com/oss-tooling/user-inactivity  about automation which helps monitor and remove inactive members from a Github organization.
+
+3. https://docs.github.com/en/enterprise-cloud@latest/admin/monitoring-activity-in-your-enterprise/reviewing-audit-logs-for-your-enterprise/using-the-audit-log-api-for-your-enterprise about GitHub Enterprise plan to get audit API.
+
