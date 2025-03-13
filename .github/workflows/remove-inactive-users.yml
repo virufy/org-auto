@@ -71,7 +71,7 @@ jobs:
             
             echo "Fetching events for $username..."
             events=$(curl -H "Authorization: Bearer ${{ secrets.ORGANIZATION_ACCESS_TOKEN }}" \
-              https://api.github.com/users/$username/events)
+              "https://api.github.com/users/$username/events")
 
             last_active=$(echo "$events" | jq -r '.[0].created_at // null')
 
@@ -111,7 +111,7 @@ jobs:
             
             echo "Fetching events for $username..."
             events=$(curl -H "Authorization: Bearer ${{ secrets.ORGANIZATION_ACCESS_TOKEN }}" \
-              https://api.github.com/users/$username/events)
+              "https://api.github.com/users/$username/events")
 
             last_active=$(echo "$events" | jq -r '.[0].created_at // null')
 
@@ -128,4 +128,24 @@ jobs:
             if [ "$is_inactive" -eq 1 ]; then
               # Exact match check with cleaned data
               if [[ ! " ${excluded_users[*]} " =~ " $normalized_username " ]]; then
-                echo "- $username (Last act
+                echo "- $username (Last active: ${last_active:-Never}) [${time_diff:-N/A}s old]" >> inactive_users.txt
+              else
+                echo "- Skipping excluded user: $username"
+              fi
+            fi
+          done
+
+          cat inactive_users.txt
+
+      # Step 7: Upload User Lists as Artifacts (All Users and Inactive Users)
+      - name: Upload User Lists as Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: all-user-list-report
+          path: all_users.txt
+      
+      - name: Upload Inactive User List Report as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: inactive-user-list-report
+          path: inactive_users.txt
