@@ -5,6 +5,9 @@ on:
     - cron: '0 0 * * 0'  # Runs at 00:00 every Sunday
   workflow_dispatch: # Allows manual triggering of the workflow
 
+env:
+  EXCLUDED_USERS: amilkh,moonnada,Frederick-Cosper,vj-virufy
+
 jobs:
   identify-users:
     name: Identify All Users and Inactive Users
@@ -92,8 +95,8 @@ jobs:
 
           echo "Inactive Users:" > inactive_users.txt
 
-          # Read excluded users from secret (comma-separated list)
-          IFS=',' read -ra excluded_users <<< "${{ secrets.EXCLUDED_USERS }}"
+          # Read excluded users from environment variable
+          IFS=',' read -ra excluded_users <<< "${{ env.EXCLUDED_USERS }}"
 
           jq -r '.[].login' org_members.json | while read username; do
             
@@ -112,11 +115,11 @@ jobs:
 
             if [ "$is_inactive" = true ]; then
                 
-              # Check if the user is in the excluded list (admins)
+              # Check if the user is in the excluded list
               if [[ ! " ${excluded_users[@]} " =~ " ${username} " ]]; then
                 echo "- $username (Last active: ${last_active:-Never})" >> inactive_users.txt
               else
-                echo "- Skipping excluded admin user: $username"
+                echo "- Skipping excluded user: $username"
               fi
 
             fi
@@ -137,4 +140,3 @@ jobs:
         with:
           name: inactive-user-list-report
           path: inactive_users.txt
-
