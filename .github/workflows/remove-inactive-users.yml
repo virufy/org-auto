@@ -2,11 +2,12 @@ name: Identify All Users and Inactive Users
 
 on:
   schedule:
-    - cron: '0 0 * * 0'  # Runs at 00:00 every Sunday
-  workflow_dispatch: # Allows manual triggering of the workflow
+    - cron: '0 0 * * 0'  # Runs weekly at midnight Sunday
+  workflow_dispatch:
 
 env:
   EXCLUDED_USERS: amilkh,moonnada,Frederick-Cosper,vj-virufy
+  INACTIVITY_THRESHOLD_DAYS: 31  # Set default value here
 
 jobs:
   identify-users:
@@ -18,127 +19,89 @@ jobs:
       - name: Authenticate GitHub CLI
         run: echo "${{ secrets.ORGANIZATION_ACCESS_TOKEN }}" | gh auth login --with-token
       
-      # Step 1: Initialize Variables
+      # Step 1: Set Threshold (now in environment)
       - name: Initialize Variables
         run: |
-          echo "Initializing variables..."
-          INACTIVITY_THRESHOLD_DAYS=31
-          export INACTIVITY_THRESHOLD_DAYS=$INACTIVITY_THRESHOLD_DAYS
-          echo "Inactivity threshold set to $INACTIVITY_THRESHOLD_DAYS days."
+          echo "INACTIVITY_THRESHOLD_DAYS=31" >> $GITHUB_ENV
+          echo "Using inactivity threshold: ${{ env.INACTIVITY_THRESHOLD_DAYS }} days"
 
       # Step 2: Checkout the repository
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # Step 3: Install jq (for JSON processing)
+      # Step 3: Install jq
       - name: Install jq
         run: sudo apt-get install jq -y
 
-      # Step 4: Fetch Organization Members (with Pagination)
+      # Step 4: Fetch Organization Members 
       - name: Fetch Organization Members
         run: |
-          echo "Fetching all organization members..."
+          echo "Fetching members..."
           page=1
           members_file="org_members.json"
-          echo "[]" > $members_file  # Initialize an empty JSON array
+          echo "[]" > $members_file
 
           while true; do
             response=$(curl -H "Authorization: Bearer ${{ secrets.ORGANIZATION_ACCESS_TOKEN }}" \
               "https://api.github.com/orgs/virufy/members?per_page=100&page=$page")
             
-            # Check if response is empty (no more pages)
             if [ "$(echo "$response" | jq '. | length')" -eq 0 ]; then
               break
             fi
 
-            # Append current page results to the JSON file
             jq -s '.[0] + .[1]' $members_file <(echo "$response") > tmp.json && mv tmp.json $members_file
-            
-            # Increment page number
             page=$((page + 1))
           done
 
-          echo "Organization members saved to $members_file"
-
-      # Step 5: Fetch User Activity for Each Member and Display All Users with Last Activity Time
-      - name: Display All Users with Last Activity Time
+      # Step 5: Display All Users
+      - name: Display All Users
         run: |
-          echo "Fetching user activity and displaying last active times..."
-          
           echo "All Users:" > all_users.txt
-
-          # Process each user in the activity report
           jq -r '.[].login' org_members.json | while read username; do
-            
-            echo "Fetching events for $username..."
             events=$(curl -H "Authorization: Bearer ${{ secrets.ORGANIZATION_ACCESS_TOKEN }}" \
               https://api.github.com/users/$username/events)
-
             last_active=$(echo "$events" | jq -r '.[0].created_at // null')
-
-            if [ "$last_active" != "null" ]; then
-              echo "- $username (Last active: $last_active)" >> all_users.txt
-            else
-              echo "- $username (Last active: Never)" >> all_users.txt
-            fi
-
+            echo "- $username (Last active: ${last_active:-Never})" >> all_users.txt
           done
-
           cat all_users.txt
 
-      # Step 6: Identify Inactive Users Based on INACTIVITY_THRESHOLD_DAYS (FIXED)
-      - name: Identify Inactive Users Based on Threshold
+      # Step 6: Identify Inactive Users (FIXED)
+      - name: Identify Inactive Users
         run: |
-          echo "Identifying inactive users based on threshold ($INACTIVITY_THRESHOLD_DAYS days)..."
+          current_timestamp=$(date -u +%s)
+          threshold_seconds=$((${{ env.INACTIVITY_THRESHOLD_DAYS }} * 86400))
           
-          # Get threshold date in UTC
-          threshold_date=$(date -u -d "$INACTIVITY_THRESHOLD_DAYS days ago" +%s)
-
           echo "Inactive Users:" > inactive_users.txt
-
-          # Read excluded users from environment variable
-          IFS=',' read -ra excluded_users <<< "${{ env.EXCLUDED_USERS }}"
-
+          echo "Threshold date: $(date -u -d "@$((current_timestamp - threshold_seconds))" '+%Y-%m-%dT%H:%M:%SZ')" >> inactive_users.txt
+          
           jq -r '.[].login' org_members.json | while read username; do
-            
-            echo "Fetching events for $username..."
             events=$(curl -H "Authorization: Bearer ${{ secrets.ORGANIZATION_ACCESS_TOKEN }}" \
               https://api.github.com/users/$username/events)
-
+              
             last_active=$(echo "$events" | jq -r '.[0].created_at // null')
-
+            
             if [ "$last_active" != "null" ]; then
-              # Convert GitHub timestamp to UTC epoch time for comparison
-              last_active_timestamp=$(date -u -d "$last_active" +%s)
-              is_active=$([ "$last_active_timestamp" -gt "$threshold_date" ] && echo true || echo false)
+              last_ts=$(date -u -d "$last_active" +%s)
+              time_diff=$((current_timestamp - last_ts))
+              is_inactive=$((time_diff > threshold_seconds))
             else
-              is_active=false  # If no activity, consider inactive by default.
+              is_inactive=1
             fi
 
-            if [ "$is_active" = false ]; then
-                
-              # Check if the user is in the excluded list (admins or other exceptions)
+            if [ "$is_inactive" -eq 1 ]; then
               if [[ ! " ${excluded_users[@]} " =~ " ${username} " ]]; then
                 echo "- $username (Last active: ${last_active:-Never})" >> inactive_users.txt
-              else
-                echo "- Skipping excluded user: $username"
               fi
-
             fi
-
           done
-
+          
           cat inactive_users.txt
 
-      # Step 7: Upload User Lists as Artifacts (All Users and Inactive Users)
-      - name: Upload User Lists as Artifacts
+      # Step 7: Upload Artifacts
+      - name: Upload Reports
         uses: actions/upload-artifact@v4
         with:
-          name: all-user-list-report
-          path: all_users.txt
-      
-      - name: Upload Inactive User List Report as Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: inactive-user-list-report
-          path: inactive_users.txt
+          name: user-reports
+          path: |
+            all_users.txt
+            inactive_users.txt
