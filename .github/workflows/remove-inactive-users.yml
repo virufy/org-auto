@@ -128,7 +128,7 @@ jobs:
             if [ "$is_inactive" -eq 1 ]; then
               # Exact match check with cleaned data
               if [[ ! " ${excluded_users[*]} " =~ " $normalized_username " ]]; then
-                echo "- $username (Last active: ${last_active:-Never}) [${time_diff:-N/A}s old]" >> inactive_users.txt
+                echo "- $username (Last active: ${last_active:-Never})" >> inactive_users.txt
               else
                 echo "- Skipping excluded user: $username"
               fi
